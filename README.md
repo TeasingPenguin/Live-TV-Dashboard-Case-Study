@@ -2,7 +2,9 @@
 
 A live dashboard I designed and run every day to manage two small businesses and my
 personal life from one screen: a TV on the wall, my phone and my laptop, all updating at
-once.
+once. Its business KPIs come straight from **GoHighLevel (GHL)**, the CRM both businesses
+run on, through its REST API. That covers bookings, pipeline values, invoices and
+customer messages across two separate sub-accounts.
 
 ![The dashboard on a 1920 × 1080 TV](screenshots/tv-dashboard.png)
 
@@ -27,8 +29,9 @@ and messages arrive all day. Answering simple questions meant checking several a
 
 One screen that answers all of that at a glance and lets me act on it straight away.
 
-- **Two businesses side by side.** Each has six metric bubbles (quotes, jobs and money for
-  today and tomorrow), worked out from GoHighLevel service bookings and opportunity values.
+- **Two businesses side by side.** Each has six KPI bubbles (quotes, jobs and money for
+  today and tomorrow), pulled live from that business's GoHighLevel sub-account: service
+  bookings for the counts, and pipeline opportunity values for the money.
 - **One to-do list per business.** Unpaid invoices sit alongside ordinary tasks, and an
   invoice can be marked paid or voided in one tap. The server re-reads the invoice first
   and asks for confirmation, so a stale screen can never pay the wrong amount.
@@ -52,6 +55,60 @@ One screen that answers all of that at a glance and lets me act on it straight a
 | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | <img src="screenshots/phone-portrait.png" width="260" alt="Portrait phone layout"> | <img src="screenshots/phone-landscape.png" width="520" alt="Landscape phone layout"> |
 
+## GoHighLevel integration
+
+Both businesses run on GoHighLevel, each in its own sub-account. The dashboard talks to
+both through the GHL REST API with a private integration token per sub-account. A token
+only works for its own sub-account, so the two are never mixed. Tokens stay on the
+server, and a backup token is tried automatically if the main one is ever rejected.
+
+| GHL area                              | What the dashboard does with it                                                                                                                                                                                                                                                      |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Calendars and services**            | Reads every booking for my user in both sub-accounts. Each bookable service (Free Quotation, Exterior Painting, CRM Setup…) is its own calendar, and GHL titles a booking `Name - Address - Service - Slot length`, which the dashboard parses into a short title and a detail line. |
+| **Blocked slots**                     | Shows time I've blocked off, but only when it isn't a copy. GHL mirrors my Google Calendar and the other sub-account's bookings into blocked slots, so most of them are duplicates.                                                                                                  |
+| **Opportunities**                     | Looks up each job customer's opportunity in the job pipeline and uses its value for the money KPIs.                                                                                                                                                                                  |
+| **Invoices**                          | Lists unpaid invoices (not paid, void or draft, with an amount due). One tap records a bank-transfer payment for the full amount, or voids it.                                                                                                                                       |
+| **Users, contacts and conversations** | Hand-offs find the team member's GHL user, then their contact, and send the SMS from the sub-account's own business number, so replies land back in GHL. The hourly AI scan reads new inbound SMS, email, calls and chats to create to-dos.                                          |
+
+### How the KPIs are calculated
+
+| KPI                     | Pulled from           | Rule                                                                                                                        |
+| ----------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Quotes today / tomorrow | GHL calendar bookings | Live bookings on a _Free Quotation_ or _Paid Quotation_ service                                                             |
+| Jobs today / tomorrow   | GHL calendar bookings | Live bookings on any other service                                                                                          |
+| Money today / tomorrow  | GHL opportunities     | Sum of the job customers' opportunity values in the job pipeline, counted once per customer even with two bookings that day |
+| Owed (per to-do list)   | GHL invoices          | Sum of the amount due on every unpaid invoice                                                                               |
+
+Cancelled bookings and blocked time never count. The rules match on the service name
+rather than one calendar ID, because some services, such as Free Quotation, exist as
+several calendars with different slot lengths.
+
+### Every 15 seconds
+
+1. The server fetches both sub-accounts' bookings and blocked slots and my Google Calendar
+   in parallel, across a window that always covers this week and tomorrow.
+2. Opportunity values are looked up for job customers (cached for a minute, since they
+   change rarely), and unpaid invoices are listed for both sub-accounts.
+3. Everything is normalised into one event shape, and Google copies of GHL bookings are
+   dropped.
+4. Any invoice that disappeared since the last refresh is checked, and recorded in the
+   history as paid, voided or closed in GHL.
+5. One snapshot goes out to every screen over the WebSocket. If one source fails, the
+   others still update, and that source shows a "sync issue" badge instead of blanking
+   the screen.
+
+### Edge cases handled
+
+- **A voided invoice returns "not found" from GHL**, so a 404 for an invoice that was on
+  the list is recorded as voided, not as an error.
+- **Stale screens can't act on old data:** paying or voiding re-reads the invoice from GHL
+  first, refuses if it's already closed, and always records the current amount due rather
+  than whatever the screen showed.
+- **Duplicates across systems:** a booking appears once, in its business's colour, even
+  though GHL and Google each hold copies of the other.
+- **Browsing other weeks** fetches that range on demand, with a short cache so flicking
+  back and forth doesn't hit the API.
+
 ## Architecture
 
 ```mermaid
@@ -73,7 +130,11 @@ flowchart LR
 ```
 
 **Stack:** React 19, Vite, Node 24, Express 5, WebSockets, systemd, Cloudflare Tunnel,
-restic and rclone, with the GoHighLevel and Google Calendar, Gmail and Drive APIs.
+restic and rclone.
+
+**Integrations:** the GoHighLevel API (calendars, opportunities, invoices, users, contacts and
+conversations, across two sub-accounts), Google Calendar, Gmail (read-only, for the AI scan),
+Google Drive (backups) and an AI agent webhook for hand-offs.
 
 ### Decisions worth explaining
 
@@ -177,6 +238,7 @@ The full history is in [CHANGELOG.md](CHANGELOG.md). In short:
 
 | Version | Date        | Highlights                                                                                                  |
 | ------- | ----------- | ----------------------------------------------------------------------------------------------------------- |
+| 1.3.1   | 5 Nov 2026  | Large amounts fit the TV's KPI bubbles; fuller demo data                                                    |
 | 1.3.0   | 5 Nov 2026  | Demo mode, documentation, dead-code clean-up                                                                |
 | 1.2.0   | 3 Nov 2026  | Permanent domain, device list, brute-force blocking, 10-minute off-site snapshots, tested disaster recovery |
 | 1.1.0   | 1 Nov 2026  | Native iPhone layouts for portrait and landscape                                                            |

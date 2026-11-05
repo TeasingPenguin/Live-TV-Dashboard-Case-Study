@@ -3,6 +3,18 @@
 All notable changes to the Live TV Dashboard. Dates are when each change went live.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.1] – 2026-11-05
+
+### Fixed
+
+- Four-figure amounts such as £1,890 were cut off ("£1,8…") in the TV's money bubbles.
+  Long values now shrink to fit the bubble on the TV; phones are unchanged.
+
+### Changed
+
+- Demo mode has a fuller week: more personal calendar events and to-dos, a second job on
+  busy days, and realistic job and invoice values.
+
 ## [1.3.0] – 2026-11-05
 
 Portfolio clean-up.
